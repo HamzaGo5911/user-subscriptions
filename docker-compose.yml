@@ -1,16 +1,35 @@
-version: '3.9'
-
+version: '3'
 services:
-  mysql_container:
-    image: mysql:5.6
-    container_name: mysql_container
+  app:
+    build: .
     environment:
-      - MYSQL_ROOT_PASSWORD=Strong_Password123!
-      - MYSQL_DATABASE=mydatabase
+      MYSQL_HOST: mysql
+      MYSQL_ROOT_PASSWORD: Strong_Password123!
+      MYSQL_DATABASE: mydatabase
+      MYSQL_USER: root
+      SECRET_KEY: SuperSecr3t123
     volumes:
-      - db_data:/var/lib/mysql
+      - ./app:/app
+    links:
+      - mysql
+    depends_on:
+      - mysql
     ports:
-      - "3308:3306"
+      - "5000:5000"
+
+  mysql:
+    image: mysql:5.7
+    volumes:
+      - mysql-data:/var/lib/mysql
+    restart: unless-stopped
+    labels:
+      project: "flask"
+    ports:
+      - "3307:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: Strong_Password123!
+      MYSQL_DATABASE: mydatabase
 
 volumes:
-  db_data:
+  mysql-data:
+    driver: local

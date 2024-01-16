@@ -1,6 +1,6 @@
 FROM python:3.10.12-slim-buster
 
-WORKDIR /app
+WORKDIR .
 
 RUN apt-get update \
     && apt-get install -y build-essential libcairo2-dev pkg-config libgirepository1.0-dev \
@@ -14,4 +14,4 @@ COPY . .
 
 EXPOSE 5000
 
-CMD ["python", "app.py"]
+CMD ["python", "run.py","--host=0.0.0.0"]

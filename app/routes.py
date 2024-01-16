@@ -1,16 +1,19 @@
-import os
-
-from flask_mail import Mail, Message
-
-from celery import Celery
-from flask import jsonify, request
+from flask import Blueprint, jsonify, request
+from flask import render_template
+from flask_mail import Message, Mail
 from sqlalchemy.exc import SQLAlchemyError
+from .models import User, Feature, Subscription, db
 
-from app import db, app
-from app.models import User, Feature, Subscription
+main = Blueprint('main', __name__)
+mail = Mail()
 
 
-@app.route('/users/<int:user_id>', methods=['GET'])
+@main.route('/')
+def index():
+    return render_template('index.html')
+
+
+@main.route('/users/<int:user_id>', methods=['GET'])
 def get_user(user_id):
     try:
         user = User.query.get_or_404(user_id)
@@ -25,7 +28,7 @@ def get_user(user_id):
         return jsonify({"message": str(e)}), 500
 
 
-@app.route('/users', methods=['POST'])
+@main.route('/users', methods=['POST'])
 def create_user():
     data = request.get_json()
 
@@ -36,7 +39,7 @@ def create_user():
     if existing_user:
         return jsonify({'error': 'User with this email or username already exists'}), 400
 
-    new_user = User(email=data['email'], username=data['username'], name=data.get('name', ''), age=data.get('age' ''))
+    new_user = User(email=data['email'], username=data['username'], name=data.get('name', ''), age=data.get('age', ''))
 
     db.session.add(new_user)
     db.session.commit()
@@ -54,7 +57,7 @@ def create_user():
     return jsonify(response), 201
 
 
-@app.route('/users/<int:user_id>', methods=['PATCH'])
+@main.route('/users/<int:user_id>', methods=['PATCH'])
 def update_user(user_id):
     try:
         user = User.query.get_or_404(user_id)
@@ -68,7 +71,7 @@ def update_user(user_id):
         return jsonify({"message": str(e)}), 500
 
 
-@app.route('/users/<int:user_id>', methods=['DELETE'])
+@main.route('/users/<int:user_id>', methods=['DELETE'])
 def delete_user(user_id):
     try:
         user = User.query.get_or_404(user_id)
@@ -80,7 +83,7 @@ def delete_user(user_id):
         return jsonify({"message": str(e)}), 500
 
 
-@app.route('/users', methods=['GET'])
+@main.route('/users', methods=['GET'])
 def get_all_users():
     try:
         users = User.query.all()
@@ -100,7 +103,7 @@ def get_all_users():
         return jsonify({"message": str(e)}), 500
 
 
-@app.route('/features', methods=['POST'])
+@main.route('/features', methods=['POST'])
 def create_feature():
     data = request.get_json()
 
@@ -133,7 +136,7 @@ def create_feature():
         return jsonify({"message": str(e)}), 500
 
 
-@app.route('/features', methods=['GET'])
+@main.route('/features', methods=['GET'])
 def get_all_features():
     try:
         features = Feature.query.all()
@@ -152,35 +155,33 @@ def get_all_features():
         return jsonify({"message": str(e)}), 500
 
 
-app.config['MAIL_SERVER'] = 'smtp.gmail.com'
-app.config['MAIL_PORT'] = 587
-app.config['MAIL_USE_TLS'] = True
-app.config['MAIL_USE_SSL'] = False
-app.config['MAIL_USERNAME'] = 'hamza.golang@gmail.com'
-app.config['MAIL_PASSWORD'] = os.environ.get('USERNAME_PASSWORD')
-app.config['MAIL_DEFAULT_SENDER'] = 'hamza.golang@gmail.com'
+def send_subscription_email(user, feature, is_feature_enabled):
+    recipient_email = user.email
+    msg = Message(subject='Wan clouds', recipients=[recipient_email])
 
-mail = Mail(app)
+    if is_feature_enabled:
+        msg.body = f"Hello {user.username}! You have subscribed to the feature: {feature.name}"
+    else:
+        msg.body = f"Hello {user.username}! You don't have any features subscribed."
 
-app.config['CELERY_BROKER_URL'] = 'redis://localhost:6379/0'
-celery = Celery(app.name, broker=app.config['CELERY_BROKER_URL'])
-celery.conf.update(app.config)
-
-
-@celery.task
-def send_async_email(subject, body, recipient):
-    msg = Message(subject=subject, sender=app.config['MAIL_DEFAULT_SENDER'], recipients=[recipient])
-    msg.body = body
     mail.send(msg)
 
 
-@app.route('/subscribe', methods=['POST'])
+def create_subscription_job(app):
+    with app.app_context():
+        for subscription in Subscription.query.all():
+            user = User.query.get(subscription.user_id)
+            feature = Feature.query.get(subscription.feature_id)
+            send_subscription_email(user, feature, subscription.is_feature_enabled)
+
+
+@main.route('/subscribe', methods=['POST'])
 def create_subscription():
     data = request.get_json()
 
     user_id = data.get('user_id')
     feature_id = data.get('feature_id')
-    is_feature_enabled = data.get('feature', False)
+    is_feature_enabled = data.get('feature', True)
 
     user = User.query.get(user_id)
     feature = Feature.query.get(feature_id)
@@ -188,28 +189,17 @@ def create_subscription():
     if not user or not feature:
         return jsonify({'error': 'User or Feature not found'}), 404
 
-    existing_subscription = (Subscription.query.filter_by(user_id=user_id, feature_id=feature_id,
-                                                          is_feature_enabled=is_feature_enabled).first())
+    existing_subscription = Subscription.query.filter_by(user_id=user_id, feature_id=feature_id,
+                                                         is_feature_enabled=is_feature_enabled).first()
 
     if existing_subscription:
         return jsonify({'error': 'User is already subscribed to this feature'}), 400
 
     new_subscription = Subscription(user_id=user_id, feature_id=feature_id, is_feature_enabled=is_feature_enabled)
-
     db.session.add(new_subscription)
     db.session.commit()
 
-    email_subject = 'Wan clouds'
-    recipient_email = user.email
-    msg = Message(subject='Wan clouds Email', sender=app.config['MAIL_DEFAULT_SENDER'],
-                  recipients=[recipient_email])
-
-    if is_feature_enabled:
-        msg.body = f"Hello! You have subscribed to the feature: {feature.name}"
-    else:
-        msg.body = "Hello! You don't have any features subscribed."
-
-    send_async_email(email_subject, msg.body, recipient_email)
+    send_subscription_email(user, feature, is_feature_enabled)
 
     response = {
         'subscription': {

@@ -12,7 +12,7 @@ class User(db.Model):
     age = db.Column(db.Integer)
 
     def __repr__(self):
-        return '<User {self.username}>'
+        return f'<User {self.username}>'
 
 
 class Feature(db.Model):
